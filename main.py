@@ -11,6 +11,8 @@ from pathlib import Path
 import asyncio
 import aiohttp
 import logging
+from datetime import datetime
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -82,8 +84,6 @@ def upload_to_s3(file_name, file_data):
 #     file_path.parent.mkdir(parents=True, exist_ok=True)
     
 #     with file_path.open('a', encoding='utf-8') as f:
-#         # f.write(f"\n\n## Message from {message.author.name} in #{message.channel.name}\n")
-#         # f.write(f"**Time**: {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 #         f.write(f"{message.content}\n")
         
 #         if message.attachments:
@@ -96,7 +96,11 @@ def upload_to_s3(file_name, file_data):
 #                                 s3_key = f'attachments/{message.id}/{attachment.filename}'
 #                                 s3_url = upload_to_s3(s3_key, content)
 #                                 if s3_url:
-#                                     f.write(f"- [{attachment.filename}]({s3_url})\n")
+#                                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#                                     if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+#                                         f.write(f"![Image {timestamp}]({s3_url})\n")
+#                                     else:
+#                                         f.write(f"- [{attachment.filename}]({s3_url}) {timestamp}\n")
 #                                     logging.info(f"Attachment {attachment.filename} uploaded and linked")
 #                                 else:
 #                                     f.write(f"- {attachment.filename} (Upload to S3 failed)\n")
@@ -108,7 +112,6 @@ def upload_to_s3(file_name, file_data):
 #                         f.write(f"- {attachment.filename} (Error processing attachment)\n")
 #                         logging.error(f"Error processing attachment {attachment.filename}: {str(e)}")
 
-from datetime import datetime
 
 async def save_message_to_file(message, category_path):
     today = datetime.now().strftime("%b %d, %Y")
@@ -117,6 +120,7 @@ async def save_message_to_file(message, category_path):
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
     with file_path.open('a', encoding='utf-8') as f:
+        timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"{message.content}\n")
         
         if message.attachments:
@@ -129,11 +133,10 @@ async def save_message_to_file(message, category_path):
                                 s3_key = f'attachments/{message.id}/{attachment.filename}'
                                 s3_url = upload_to_s3(s3_key, content)
                                 if s3_url:
-                                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
-                                        f.write(f"![Image {timestamp}]({s3_url})\n")
+                                        f.write(f"![Image]({s3_url})\n")
                                     else:
-                                        f.write(f"- [{attachment.filename}]({s3_url}) {timestamp}\n")
+                                        f.write(f"- [{attachment.filename}]({s3_url})\n")
                                     logging.info(f"Attachment {attachment.filename} uploaded and linked")
                                 else:
                                     f.write(f"- {attachment.filename} (Upload to S3 failed)\n")
@@ -144,6 +147,9 @@ async def save_message_to_file(message, category_path):
                     except Exception as e:
                         f.write(f"- {attachment.filename} (Error processing attachment)\n")
                         logging.error(f"Error processing attachment {attachment.filename}: {str(e)}")
+        
+        f.write("\n---\n\n")
+
 
 async def process_historical_messages():
     print("Processing historical messages...")
@@ -164,6 +170,18 @@ async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     await process_historical_messages()
 
+# @bot.event
+# async def on_message(message):
+#     if message.author == bot.user:
+#         return
+
+#     category_path = get_category_path(message.channel.name)
+#     await save_message_to_file(message, category_path)
+#     save_last_message_id(message.id)
+#     print(f"Saved message ID: {message.id} to {category_path}")
+
+#     await bot.process_commands(message)
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -174,7 +192,8 @@ async def on_message(message):
     save_last_message_id(message.id)
     print(f"Saved message ID: {message.id} to {category_path}")
 
-    await bot.process_commands(message)
+    # Remove this line if you're not using command processing
+    # await bot.process_commands(message)
 
 async def main():
     check_paths()
