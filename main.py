@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 load_dotenv()
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  
 intents.guilds = True
 intents.messages = True
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -32,7 +32,6 @@ MEDITATIONS_PATH = Path(os.getenv('MEDITATIONS_PATH', OBSIDIAN_VAULT / 'meditati
 
 LAST_MESSAGE_FILE = OBSIDIAN_VAULT / "last_message_id.txt"
 
-# S3 configuration
 s3 = boto3.client('s3',
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
@@ -76,42 +75,6 @@ def upload_to_s3(file_name, file_data):
     except Exception as e:
         logging.error(f"Error uploading {file_name} to S3: {str(e)}")
     return None
-
-# async def save_message_to_file(message, category_path):
-#     today = datetime.now().strftime("%b %d, %Y")
-#     file_path = category_path / f"{today}.md"
-    
-#     file_path.parent.mkdir(parents=True, exist_ok=True)
-    
-#     with file_path.open('a', encoding='utf-8') as f:
-#         f.write(f"{message.content}\n")
-        
-#         if message.attachments:
-#             for attachment in message.attachments:
-#                 async with aiohttp.ClientSession() as session:
-#                     try:
-#                         async with session.get(attachment.url) as response:
-#                             if response.status == 200:
-#                                 content = await response.read()
-#                                 s3_key = f'attachments/{message.id}/{attachment.filename}'
-#                                 s3_url = upload_to_s3(s3_key, content)
-#                                 if s3_url:
-#                                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#                                     if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
-#                                         f.write(f"![Image {timestamp}]({s3_url})\n")
-#                                     else:
-#                                         f.write(f"- [{attachment.filename}]({s3_url}) {timestamp}\n")
-#                                     logging.info(f"Attachment {attachment.filename} uploaded and linked")
-#                                 else:
-#                                     f.write(f"- {attachment.filename} (Upload to S3 failed)\n")
-#                                     logging.warning(f"Failed to upload {attachment.filename} to S3")
-#                             else:
-#                                 f.write(f"- {attachment.filename} (Download failed)\n")
-#                                 logging.warning(f"Failed to download {attachment.filename}: Status {response.status}")
-#                     except Exception as e:
-#                         f.write(f"- {attachment.filename} (Error processing attachment)\n")
-#                         logging.error(f"Error processing attachment {attachment.filename}: {str(e)}")
-
 
 async def save_message_to_file(message, category_path):
     today = datetime.now().strftime("%b %d, %Y")
@@ -170,18 +133,6 @@ async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     await process_historical_messages()
 
-# @bot.event
-# async def on_message(message):
-#     if message.author == bot.user:
-#         return
-
-#     category_path = get_category_path(message.channel.name)
-#     await save_message_to_file(message, category_path)
-#     save_last_message_id(message.id)
-#     print(f"Saved message ID: {message.id} to {category_path}")
-
-#     await bot.process_commands(message)
-
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -192,8 +143,6 @@ async def on_message(message):
     save_last_message_id(message.id)
     print(f"Saved message ID: {message.id} to {category_path}")
 
-    # Remove this line if you're not using command processing
-    # await bot.process_commands(message)
 
 async def main():
     check_paths()
