@@ -205,7 +205,6 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Process all new messages from any channel in SPECIFIED_CHANNEL_IDS
     if message.channel.id in HISTORICAL_CHANNEL_IDS:
         category_path = get_category_path(message.channel.name)
         await save_message_to_file(message, category_path)
