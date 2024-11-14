@@ -2,10 +2,8 @@ import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
-import json
 from datetime import datetime
 import boto3
-import requests
 from botocore.exceptions import NoCredentialsError
 from pathlib import Path
 import asyncio
@@ -29,8 +27,18 @@ OBSIDIAN_VAULT = Path(os.getenv('OBSIDIAN_VAULT', '~/Documents/Obsidian')).expan
 REMEMBER_PATH = Path(os.getenv('REMEMBER_PATH', OBSIDIAN_VAULT / 'remember days')).expanduser().resolve()
 THOUGHTS_PATH = Path(os.getenv('THOUGHTS_PATH', OBSIDIAN_VAULT / 'thoughts/days')).expanduser().resolve()
 MEDITATIONS_PATH = Path(os.getenv('MEDITATIONS_PATH', OBSIDIAN_VAULT / 'meditations/days')).expanduser().resolve()
+LEARNINGS_PATH = Path(os.getenv('LEARNINGS_PATH', OBSIDIAN_VAULT / 'learnings/work')).expanduser().resolve()
+GENERAL_PATH = Path(os.getenv('GENERAL_PATH', OBSIDIAN_VAULT / 'general')).expanduser().resolve()
+
 
 LAST_MESSAGE_FILE = OBSIDIAN_VAULT / "last_message_id.txt"
+
+HISTORICAL_CHANNEL_IDS = [
+    1286285881090642015,  
+    1286329619657658580,
+    1286329650229936219, 
+    1286329685214498929
+]
 
 s3 = boto3.client('s3',
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
@@ -45,16 +53,54 @@ def check_paths():
             print(f"Creating directory: {path}")
             path.mkdir(parents=True, exist_ok=True)
 
-def get_last_message_id():
-    try:
-        with LAST_MESSAGE_FILE.open('r') as f:
-            return int(f.read().strip())
-    except FileNotFoundError:
-        return 0
+# Dictionary to hold last message IDs for each channel
+channel_last_message_ids = {}
 
-def save_last_message_id(message_id):
-    with LAST_MESSAGE_FILE.open('w') as f:
-        f.write(str(message_id))
+def save_last_message_id_for_channel(channel_id, message_id):
+    # Read existing entries
+    entries = {}
+    if LAST_MESSAGE_FILE.exists():
+        with open(LAST_MESSAGE_FILE, 'r') as f:
+            for line in f.readlines():
+                line = line.strip()
+                if ':' in line:
+                    ch_id, msg_id = line.split(':')
+                    entries[int(ch_id)] = int(msg_id)
+    
+    # Update with new message ID only if it's more recent
+    if channel_id not in entries or int(message_id) > entries[channel_id]:
+        entries[channel_id] = int(message_id)
+    
+    # Write all entries back to file
+    with open(LAST_MESSAGE_FILE, 'w') as f:
+        for ch_id, msg_id in entries.items():
+            f.write(f"{ch_id}:{msg_id}\n")
+    
+    logging.info(f"Channel {channel_id}: Saved last message ID - {message_id}")
+
+def get_last_message_id_for_channel(channel_id):
+    try:
+        with open(LAST_MESSAGE_FILE, 'r') as f:
+            latest_message_id = 0
+            for line in f.readlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(':')
+                if len(parts) != 2:
+                    continue
+                saved_channel_id, saved_message_id = parts
+                if int(saved_channel_id) == channel_id:
+                    message_id = int(saved_message_id)
+                    if message_id > latest_message_id:
+                        latest_message_id = message_id
+            return latest_message_id
+    except FileNotFoundError:
+        logging.error(f"File not found: {LAST_MESSAGE_FILE}")
+        return 0
+    except ValueError as ve:
+        logging.error(f"ValueError: {ve}")
+        return 0
 
 def get_category_path(channel_name):
     channel_name = channel_name.lower()
@@ -64,6 +110,8 @@ def get_category_path(channel_name):
         return THOUGHTS_PATH
     elif "meditations" in channel_name:
         return MEDITATIONS_PATH
+    elif "general" in channel_name:
+        return GENERAL_PATH
     else:
         return OBSIDIAN_VAULT / 'Uncategorized'
 
@@ -115,18 +163,37 @@ async def save_message_to_file(message, category_path):
 
 
 async def process_historical_messages():
-    print("Processing historical messages...")
-    last_message_id = get_last_message_id()
+    logging.info("Starting to process historical messages for specified channels...")
     
     for guild in bot.guilds:
         for channel in guild.text_channels:
+            # Only process if the channel is in the historical processing list
+            if channel.id not in HISTORICAL_CHANNEL_IDS:
+                continue
+            
+            logging.info(f"Processing historical messages for channel: {channel.name} (ID: {channel.id})")
+            
             category_path = get_category_path(channel.name)
-            async for message in channel.history(limit=None, after=discord.Object(id=last_message_id)):
-                await save_message_to_file(message, category_path)
-                last_message_id = max(last_message_id, message.id)
+            last_message_id = get_last_message_id_for_channel(channel.id)
+            
+            logging.info(f"Last processed message ID for channel {channel.name}: {last_message_id}")
+            
+            message_count = 0
+            try:
+                async for message in channel.history(limit=None, after=discord.Object(id=last_message_id)):
+                    await save_message_to_file(message, category_path)
+                    save_last_message_id_for_channel(channel.id, message.id)
+                    message_count += 1
+                    
+                    if message_count % 100 == 0:  # Log progress every 100 messages
+                        logging.info(f"Processed {message_count} messages in {channel.name}")
+                
+                logging.info(f"Finished processing {message_count} messages in {channel.name}")
+                
+            except Exception as e:
+                logging.error(f"Error processing channel {channel.name}: {str(e)}")
     
-    save_last_message_id(last_message_id)
-    print("Finished processing historical messages.")
+    logging.info("Finished processing historical messages for specified channels.")
 
 @bot.event
 async def on_ready():
@@ -138,10 +205,12 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    category_path = get_category_path(message.channel.name)
-    await save_message_to_file(message, category_path)
-    save_last_message_id(message.id)
-    print(f"Saved message ID: {message.id} to {category_path}")
+    # Process all new messages from any channel in SPECIFIED_CHANNEL_IDS
+    if message.channel.id in HISTORICAL_CHANNEL_IDS:
+        category_path = get_category_path(message.channel.name)
+        await save_message_to_file(message, category_path)
+        save_last_message_id_for_channel(message.channel.id, message.id)
+        logging.info(f"Saved new message ID: {message.id} in Channel: {message.channel.id}")
 
 
 async def main():
